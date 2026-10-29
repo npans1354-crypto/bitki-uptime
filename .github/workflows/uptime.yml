@@ -1,0 +1,39 @@
+# Внешняя проверка доступности публичного сайта bitkicars.ru: главная страница и /health.
+# Только публичные адреса, без секретов и без кода продукта. Упало → прогон красный → GitHub шлёт письмо владельцу.
+name: uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # раз в 10 мин (публичный репо — минуты Actions бесплатны); GitHub может задерживать cron
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Сайт и /health снаружи
+        env:
+          SITE: https://bitkicars.ru
+        run: |
+          set -u
+          fail=0
+          probe() { # $1 = путь, $2 = что должно быть в ответе
+            local code body
+            body=$(curl -sS --max-time 20 --retry 2 --retry-delay 20 --retry-all-errors \
+                        -A "bitki-uptime/1 (GitHub Actions)" -w '\n%{http_code}' "$SITE$1") || { echo "FAIL $1: нет соединения/TLS"; fail=1; return; }
+            code=${body##*$'\n'}; body=${body%$'\n'*}
+            if [ "$code" = 200 ] && printf '%s' "$body" | grep -q -- "$2"; then echo "OK   $1 ($code)"; else echo "FAIL $1: HTTP $code"; fail=1; fi
+          }
+          probe /health '"status":"ok"'
+          probe / '<html'
+          if [ "$fail" != 0 ]; then
+            echo "::error::bitkicars.ru не отвечает снаружи"
+            exit 1
+          fi
